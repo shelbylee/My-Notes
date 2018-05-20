@@ -15,7 +15,7 @@ Output: "s'teL ekat edoCteeL tsetnoc"
 Note: In the string, each word is separated by single space and there will not be any extra space in the string.
 
 空格分隔，逐个反转
-```
+```java
 class Solution {
     public String reverseWords(String s) {
         
@@ -58,7 +58,7 @@ The string consists of lower English letters only.
 Length of the given string and k will in the range [1, 10000]
 
 
-```
+```java
 class Solution {
     public String reverseStr(String s, int k) {
         
