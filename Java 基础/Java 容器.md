@@ -220,9 +220,292 @@ public class TreeMap<K,V>
     implements NavigableMap<K,V>, Cloneable, java.io.Serializable
 ```
 
-3. Red-Black Tree
+3. 重要属性
+```java
+    // 比较器可以用来保证顺序，如果为空，则按 key 的自然顺序
+    private final Comparator<? super K> comparator;
+
+    // 红黑树根结点
+    private transient Entry<K,V> root;
+
+    // 树中结点个数（容器大小）
+    private transient int size = 0;
+
+    private transient int modCount = 0;
+
+    // Red-black mechanics
+
+    private static final boolean RED   = false;
+    private static final boolean BLACK = true;
+```
+
+Entry 中的属性包括
+```java
+        K key;
+        V value;
+        Entry<K,V> left;
+        Entry<K,V> right;
+        Entry<K,V> parent;
+        boolean color = BLACK;
+```
+
+4. Red-Black Tree
 
 要想弄明白 TreeMap，还是要先理解 RBT。
+
+- 红黑树是一种高效的二叉查找树（BST, Binary Search Tree），时间复杂度为 O(logn)，首先它肯定具有 BST 的特点：
+    - BST 的特点：
+        - 左子的值 <= 父节点的值
+        - 右子的值 >= 父节点的值
+
+BST 虽然也可以快速查找，但是有一个问题，在最坏的情况下，如果要插入的序列本身就是有序的，那么这棵树显然就是一个只有左子 or 只有右子的树，这种情况再进行查找，就和遍历链表无异了。因此，为了改进 BST，相应的出现了一些基于 BST，但比其更高效的数据结构，比如 RBT。
+
+- RBT 除了上面的特点之外，还具有以下五个特点：
+    - 节点是红色或黑色。
+    - 根节点是黑色。
+    - 每个叶子节点都是黑色的空节点（NIL节点）。
+    - 每个红色节点的两个子节点都是黑色。(从每个叶子到根的所有路径上不能有两个连续的红色节点)
+    - 从任一节点到其每个叶子的所有路径都包含相同数目的黑色节点。
+
+同时，为了保持上面的五个特点，在增删改的过程中需要对树进行相应的操作（左、右旋，变色）。
+
+5. RBT 和 AVL 树
+
+AVL 和 RBT 都是自平衡的二叉树，不过 RBT 并不符合 AVL 树的平衡条件，也就是说相对于 RBT，AVL “更平衡”，RBT 是用这种非严格的平衡来换取增删结点时旋转次数的降低，由于 RBT 的设计，任何不平衡都会在三次旋转之内解决，而 AVL 也被称为高度平衡树，它的左子和右子的高度差距不能超过一，因此 AVL 在增删时，旋转的次数可能比红黑树要多，不过 RBT 也少不了变色的操作，所以具体 RBT 和 AVL 哪个更快，我也说不清楚，知乎上有人自己做了一下测评，结论是差不多... [AVL树，红黑树，B树，B+树，Trie树都分别应用在哪些现实场景中？ - 韦易笑的回答 - 知乎](https://www.zhihu.com/question/30527705/answer/259948086) emmm 这个无关紧要，自己写很难比得上库里的吧，还是老老实实调用吧 orz 
+
+6. 查找
+
+查找就很简单了，但是，有一个小小的需要注意的地方
+
+> A return value of null does not necessarily indicate that the map contains no mapping for the key; it's also possible that the map explicitly maps the key to null. The containsKey operation may be used to distinguish these two cases.
+
+这是文档中对 get 方法的一段描述，意思是即使 get(key) 返回 null，也不一定表明不包含这么一个 map，因为可以存储 null 值呀。
+
+那么 TreeMap 可以存储 null 的 key 吗？
+
+答案是可以的，因为可以传入比较器，所以可以通过比较器强制让其为 null 时返回一个值，而 TreeMap 在 get 时会根据我们是否传入比较器去 get。
+
+```java
+    public V get(Object key) {
+        Entry<K,V> p = getEntry(key);
+        return (p==null ? null : p.value);
+    }
+```
+
+```java
+    final Entry<K,V> getEntry(Object key) {
+        // Offload comparator-based version for sake of performance
+        // 如果比较器非空，采用用户提供的比较器
+        if (comparator != null)
+            return getEntryUsingComparator(key);
+        if (key == null)
+            throw new NullPointerException();
+        @SuppressWarnings("unchecked")
+            Comparable<? super K> k = (Comparable<? super K>) key;
+        Entry<K,V> p = root;
+        while (p != null) {
+            // 将传入的 key 与当前结点的 key 比较
+            int cmp = k.compareTo(p.key);
+            // 如果传入的 key 小，继续查找左子
+            if (cmp < 0)
+                p = p.left;
+            // 如果传入的 key 大，继续查找右子
+            else if (cmp > 0)
+                p = p.right;
+            else // 找到了
+                return p;
+        }
+        return null;
+    }
+```
+采用用户提供的比较器查找
+```java
+    final Entry<K,V> getEntryUsingComparator(Object key) {
+        @SuppressWarnings("unchecked")
+            K k = (K) key;
+        Comparator<? super K> cpr = comparator;
+        if (cpr != null) {
+            Entry<K,V> p = root;
+            while (p != null) {
+                int cmp = cpr.compare(k, p.key);
+                if (cmp < 0)
+                    p = p.left;
+                else if (cmp > 0)
+                    p = p.right;
+                else
+                    return p;
+            }
+        }
+        return null;
+    }
+```
+
+7. 添加
+```java
+    public V put(K key, V value) {
+        Entry<K,V> t = root;
+        // 如果当前树为空，则直接创建一个根结点
+        if (t == null) {
+            compare(key, key); // type (and possibly null) check
+
+            root = new Entry<>(key, value, null);
+            size = 1;
+            modCount++;
+            return null;
+        }
+        // 存放比较后的结果
+        int cmp;
+        Entry<K,V> parent;
+        // split comparator and comparable paths
+        // 获取比较器
+        Comparator<? super K> cpr = comparator;
+        // 如果比较器不为空，则按照用户提供的比较器进行排序
+        if (cpr != null) {
+            do {
+                parent = t;
+                cmp = cpr.compare(key, t.key);
+                // 如果插入的 key 比该结点的 key 小，则继续遍历左子
+                // 直到找到可以插入的合适位置（维持平衡）
+                if (cmp < 0)
+                    t = t.left;
+                // 同理
+                else if (cmp > 0)
+                    t = t.right;
+                else
+                    // 如果相等，则覆盖之前的值
+                    return t.setValue(value);
+            } while (t != null);
+        }
+        else {
+            // 按照自然顺序排序
+            if (key == null)
+                throw new NullPointerException();
+            @SuppressWarnings("unchecked")
+                Comparable<? super K> k = (Comparable<? super K>) key;
+            do {
+                parent = t;
+                cmp = k.compareTo(t.key);
+                if (cmp < 0)
+                    t = t.left;
+                else if (cmp > 0)
+                    t = t.right;
+                else
+                    return t.setValue(value);
+            } while (t != null);
+        }
+        Entry<K,V> e = new Entry<>(key, value, parent);
+        // 把这个插入的新结点挂上去
+        // 根据比较的结果决定挂到左子还是右子
+        if (cmp < 0)
+            parent.left = e;
+        else
+            parent.right = e;
+        // 在插入后保证红黑树的平衡
+        fixAfterInsertion(e);
+        size++;
+        modCount++;
+        return null;
+    }
+```
+
+8. 删除
+
+RBT 的删除比较复杂
+
+- 要删的结点是叶子结点，这是最简单的情况，直接删除就可以
+- 要删的结点只有左子树
+    - 将该结点的左子树挂到该结点的父结点的左子上就可以
+- 要删的结点只有右子树
+    - 将该结点的右子树挂到该结点的父结点的右子上就可以
+- 要删的结点左右子均非空
+    - TreeMap 中采用的方式是这样的：用该结点的树的中序的前驱 or 后继来代替这个要被删除的结点，也就是用该结点的左子最大者 or 右子最小者来代替它，然后将子结点删除就可以，这样可以简化删除的过程。
+
+```java
+    /**
+     * Delete node p, and then rebalance the tree.
+     */
+    private void deleteEntry(Entry<K,V> p) {
+        modCount++;
+        size--;
+
+        // If strictly internal, copy successor's element to p and then make p
+        // point to successor.
+        // 如果左右子均非空，用该结点的 successor（右子最小者）来代替
+        if (p.left != null && p.right != null) {
+            Entry<K,V> s = successor(p);
+            p.key = s.key;
+            p.value = s.value;
+            p = s;
+        } // p has 2 children
+
+        // Start fixup at replacement node, if it exists.
+        // 如果左子存在，用 replacement 表示左子，否则表示右子
+        Entry<K,V> replacement = (p.left != null ? p.left : p.right);
+
+        if (replacement != null) {
+            // Link replacement to parent
+            // 将 replacement 连到要删除结点的父结点上
+            replacement.parent = p.parent;
+            if (p.parent == null)
+                root = replacement;
+            // 如果要删的结点是父结点的左子，就把 replacement 挂到左子上
+            else if (p == p.parent.left)
+                p.parent.left  = replacement;
+            // 如果要删的结点是父结点的右子，就把 replacement 挂到右子上
+            else
+                p.parent.right = replacement;
+
+            // Null out links so they are OK to use by fixAfterDeletion.
+            p.left = p.right = p.parent = null;
+
+            // Fix replacement
+            if (p.color == BLACK)
+                fixAfterDeletion(replacement);
+        } else if (p.parent == null) { // return if we are the only node.
+            root = null;
+        } else { //  No children. Use self as phantom replacement and unlink.
+            if (p.color == BLACK)
+                fixAfterDeletion(p);
+
+            if (p.parent != null) {
+                if (p == p.parent.left)
+                    p.parent.left = null;
+                else if (p == p.parent.right)
+                    p.parent.right = null;
+                p.parent = null;
+            }
+        }
+    }
+```
+在 deleteEntry 中用到的 successor 就是用来返回要删除的结点的树的中序后继的，也就是该结点右子最小者。
+```java
+    /**
+     * Returns the successor of the specified Entry, or null if no such.
+     */
+    static <K,V> TreeMap.Entry<K,V> successor(Entry<K,V> t) {
+        if (t == null)
+            return null;
+        else if (t.right != null) {
+            Entry<K,V> p = t.right;
+            while (p.left != null)
+                p = p.left;
+            return p;
+        } else {
+            Entry<K,V> p = t.parent;
+            Entry<K,V> ch = t;
+            while (p != null && ch == p.right) {
+                ch = p;
+                p = p.parent;
+            }
+            return p;
+        }
+    }
+```
+
+9. 修复方法
+
+每次插入或者删除后，需要 fix，让二叉查找树保持红黑树的特征，fix 包括变色旋转，挺复杂的，需要考虑很多种情况，看到一篇讲的很清晰的 IBM 的博客
+[通过分析 JDK 源代码研究 TreeMap 红黑树算法实现](https://www.ibm.com/developerworks/cn/java/j-lo-tree/)
 
 ##### 1.4 ConcurrentHashMap
 
@@ -314,7 +597,14 @@ LinkedHashSet 其实也是借助 LinkedHashMap 实现的。
 
 ##### 2.3 TreeSet
 
+基于 TreeMap 的对 Set 接口的实现。
 
+无参的构造函数。从构造函数就可以看出来，TreeSet 借助 TreeMap 实现
+```java
+    public TreeSet() {
+        this(new TreeMap<E,Object>());
+    }
+```
 
 #### 3. List
 ![image](http://www.codejava.net/images/articles/javacore/collections/list/List%20Collections%20class%20diagram.png)
