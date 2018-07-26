@@ -15,7 +15,7 @@
 
 使用静态工厂方法有很多优势
 1. 有名字，更清晰
-2. 不用每次调用时都创建新对象，提升性能
+2. 不用每次调用时都创建新对象（可以先创建好，在工厂中返回）提升性能
 3. 可以返回原返回类型的任意子类型，更灵活
 
 比如在 Guava 的 collect 包中就大量使用静态工厂方法代替构造器来创建对象。
@@ -32,7 +32,143 @@
 ```
 ### Item 2: Consider a builder when faced with many constructor parameters
 
-lombok 已经给我们提供了用 builder 创建对象的便捷方式。
+```java
+package com.lxb.draft.effectiveJava;
+
+public class Person {
+
+    private final String life;
+    private final String healthy;
+    private final String money;
+    private final String sex;
+    private final String power;
+
+    public static class Builder {
+        // required param
+        private final String life;
+        private final String healthy;
+
+        // optional param
+        private String money = "money";
+        private String sex = "sex";
+        private String power = "power";
+
+        public Builder(String life, String healthy) {
+            this.life = life;
+            this.healthy = healthy;
+        }
+
+        public Builder money(String val) {
+            money = val;
+            return this;
+        }
+
+        public Builder sex(String val) {
+            sex = val;
+            return this;
+        }
+
+        public Builder power(String val) {
+            power = val;
+            return this;
+        }
+
+        public Person build() {
+            return new Person(this);
+        }
+
+    }
+
+    private Person(Builder builder) {
+        life = builder.life;
+        healthy = builder.healthy;
+        money = builder.money;
+        sex = builder.sex;
+        power = builder.power;
+    }
+
+}
+
+```
+用 Builder 模式会更冗长，因此适用于参数很多时使用，但谁知道以后你会不会需要添加参数呢，所以最好一开始就使用 Builder。
+
+比如，Calender.java 在 Java 8 后加入了 Builder，用于使用多种 date-time 参数创建 Calender。
+
+```java
+    public static class Builder {
+        private static final int NFIELDS = FIELD_COUNT + 1; // +1 for WEEK_YEAR
+        private static final int WEEK_YEAR = FIELD_COUNT;
+
+        private long instant;
+        // Calendar.stamp[] (lower half) and Calendar.fields[] (upper half) combined
+        private int[] fields;
+        // Pseudo timestamp starting from MINIMUM_USER_STAMP.
+        // (COMPUTED is used to indicate that the instant has been set.)
+        private int nextStamp;
+        // maxFieldIndex keeps the max index of fields which have been set.
+        // (WEEK_YEAR is never included.)
+        private int maxFieldIndex;
+        private String type;
+        private TimeZone zone;
+        private boolean lenient = true;
+        private Locale locale;
+        private int firstDayOfWeek, minimalDaysInFirstWeek;
+        
+        ......
+```
+
+lombok 的 @Builder 也是类似的做法
+
+```java
+Before:
+
+ @Builder
+ class Example {
+        private int foo;
+        private final String bar;
+ }
+ 
+After:
+ class Example<T> {
+        private T foo;
+        private final String bar;
+        
+        private Example(T foo, String bar) {
+                this.foo = foo;
+                this.bar = bar;
+        }
+        
+        public static <T> ExampleBuilder<T> builder() {
+                return new ExampleBuilder<T>();
+        }
+        
+        public static class ExampleBuilder<T> {
+                private T foo;
+                private String bar;
+                
+                private ExampleBuilder() {}
+                
+                public ExampleBuilder foo(T foo) {
+                        this.foo = foo;
+                        return this;
+                }
+                
+                public ExampleBuilder bar(String bar) {
+                        this.bar = bar;
+                        return this;
+                }
+                
+                @java.lang.Override public String toString() {
+                        return "ExampleBuilder(foo = " + foo + ", bar = " + bar + ")";
+                }
+                
+                public Example build() {
+                        return new Example(foo, bar);
+                }
+        }
+ }
+```
+
 
 ### Item 3: Enforce the singleton property with a private constructor or an enum type
 
